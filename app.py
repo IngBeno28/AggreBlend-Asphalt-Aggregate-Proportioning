@@ -4,9 +4,9 @@ Asphalt Coarse Aggregate Proportioning Calculator
 Automation_hub | Materials & Geotechnical Engineering Tools
 
 Given the percent-passing gradation of 2-6 aggregate stockpiles, this tool
-solves for the blend proportions that best satisfy a target job-mix
-gradation band, then reports the blended gradation against the spec and
-lets you fine-tune by hand.
+proposes three trial blends (coarse-leaning, balanced, fine-leaning) that
+best satisfy a target job-mix gradation band, then reports the blended
+gradation against the spec and exports a branded PDF/Excel report.
 
 Spec source (default): Ghana Highway Authority, Standard Specification for
 Road and Bridge Works, Table 17.3 - Grading Requirements for Asphalt
@@ -16,6 +16,7 @@ Run locally with:  streamlit run app.py
 """
 
 import io
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -24,8 +25,9 @@ import matplotlib.pyplot as plt
 
 from gradation_core import (
     SIEVES, SIEVE_LABELS, NMAS_MM, SPEC, available_courses,
-    available_designations, get_target, optimize_blend, evaluate_blend,
+    available_designations, get_target, optimize_blend_options, evaluate_blend,
 )
+from pdf_report import build_pdf_report, APP_NAME
 
 
 def _dedupe(names):
@@ -41,21 +43,71 @@ def _dedupe(names):
             out.append(f"{n} ({seen[n] + 1})")
     return out
 
-st.set_page_config(page_title="Asphalt Aggregate Proportioning", layout="wide")
+
+st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="🛣️")
 
 # =======================================================================
-# Header
+# Hero styling
 # =======================================================================
-st.title("Asphalt Coarse Aggregate Proportioning Calculator")
-st.caption(
-    "Automation_hub — Materials & Geotechnical Engineering Tools. "
-    "Target gradation bands from the Ghana Highway Authority Standard "
-    "Specification, Table 17.3."
-)
+st.markdown("""
+<style>
+.hero-wrap { padding-bottom: 6px; }
+.hero-row { display: flex; align-items: center; gap: 16px; margin-bottom: 2px; }
+.hero-icon {
+    font-size: 2.6rem; line-height: 1; background: #eef2ff; border-radius: 14px;
+    width: 62px; height: 62px; display: flex; align-items: center; justify-content: center;
+}
+.hero-title { font-size: 2.1rem; font-weight: 800; color: #111827; margin: 0; }
+.hero-subtitle { color: #6b7280; font-size: 1.02rem; margin: 4px 0 0 0; }
+.hero-rule {
+    height: 4px; width: 100%; margin: 16px 0 22px 0; border-radius: 3px;
+    background: linear-gradient(90deg, #1a56db 0%, #4C78A8 55%, #93c5fd 100%);
+}
+.blend-card {
+    border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px;
+    background: #fafafa; height: 100%;
+}
+.blend-badge-pass { color: #15803d; font-weight: 700; }
+.blend-badge-fail { color: #b91c1c; font-weight: 700; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown(f"""
+<div class="hero-wrap">
+  <div class="hero-row">
+    <div class="hero-icon">🛣️</div>
+    <div>
+      <p class="hero-title">{APP_NAME}</p>
+      <p class="hero-subtitle">Best-fit stockpile blending against Ghana Highway Authority
+      Table 17.3 gradation bands — with coarse, balanced, and fine trial blends compared side by side.</p>
+    </div>
+  </div>
+  <div class="hero-rule"></div>
+</div>
+""", unsafe_allow_html=True)
+
+# =======================================================================
+# Sidebar: Project Information
+# =======================================================================
+with st.sidebar:
+    st.markdown("### Project Information")
+    project_name = st.text_input("Project Name", placeholder="Unnamed Project")
+    prepared_for = st.text_input("Prepared For (Client)", placeholder="e.g. Ghana Highway Authority")
+    prepared_by = st.text_input("Prepared By", value="Automation_hub Engineering Group Limited")
+    engineer_name = st.text_input("Engineer Name (for certification)",
+                                   value="Ing. Bernard Wiafe Akenteng")
+    report_date = st.date_input("Report Date", value=date.today())
+
+project_info = {
+    "project_name": project_name,
+    "prepared_for": prepared_for,
+    "prepared_by": prepared_by,
+    "engineer_name": engineer_name,
+    "report_date": report_date.strftime("%Y-%m-%d"),
+}
 
 # =======================================================================
 # 1. Mix type / course / designation selection
-#    (the engineer picks Type I or Type II, and the applicable course)
 # =======================================================================
 st.header("1. Target mix")
 
@@ -164,11 +216,11 @@ if warnings:
     )
 
 # =======================================================================
-# 3. Run optimization
+# 3. Proportioning — three trial blends
 # =======================================================================
 st.header("3. Proportioning")
 
-run = st.button("Compute best-fit proportions", type="primary")
+run = st.button("Compute proportioning options", type="primary")
 
 if run:
     matrix = grad_df.loc[SIEVE_LABELS, pile_names].to_numpy(dtype=float)
@@ -181,9 +233,9 @@ if run:
         st.session_state.pop("results", None)
     else:
         try:
-            res = optimize_blend(matrix, target, min_pct=min_pcts, max_pct=max_pcts)
+            options = optimize_blend_options(matrix, target, min_pct=min_pcts, max_pct=max_pcts)
             st.session_state["results"] = {
-                "matrix": matrix, "names": pile_names, "res": res,
+                "matrix": matrix, "names": pile_names, "options": options,
             }
         except ValueError as e:
             st.error(str(e))
@@ -192,26 +244,63 @@ if run:
 if "results" in st.session_state:
     matrix = st.session_state["results"]["matrix"]
     names = st.session_state["results"]["names"]
-    res = st.session_state["results"]["res"]
+    options = st.session_state["results"]["options"]
+
+    n_fails = [int((~o["result"]["passes"]).sum()) for o in options]
+    default_idx = int(np.argmin(n_fails))
+
+    st.subheader("Trial blend comparison")
+    st.caption(
+        "Three trial blends are generated across the spec band — coarse-leaning, "
+        "balanced (mid-band), and fine-leaning — following standard trial-blend "
+        "practice. Pick one below to carry forward for the detailed report."
+    )
+
+    cols = st.columns(len(options))
+    for i, (col, opt) in enumerate(zip(cols, options)):
+        with col:
+            nf = n_fails[i]
+            badge_html = (
+                '<span class="blend-badge-pass">✓ Meets spec</span>' if nf == 0
+                else f'<span class="blend-badge-fail">⚠ {nf} sieve(s) fail</span>'
+            )
+            mini_df = pd.DataFrame({
+                "Stockpile": names,
+                "%": np.round(opt["result"]["weights"] * 100, 1),
+            })
+            st.markdown(
+                f'<div class="blend-card"><b>{opt["label"]}</b><br>'
+                f'<span style="color:#6b7280;font-size:0.85rem;">{opt["note"]}</span><br><br>'
+                f'{badge_html}</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(mini_df, hide_index=True, use_container_width=True, height=38 * (len(names) + 1))
+
+    st.write("")
+    selected_label = st.radio(
+        "Use this blend for the detailed report",
+        [o["label"] for o in options], index=default_idx, horizontal=True,
+    )
+    selected = next(o for o in options if o["label"] == selected_label)
+    res = selected["result"]
+    n_fail = n_fails[[o["label"] for o in options].index(selected_label)]
 
     if not res["success"]:
         st.warning(
-            "The optimizer did not fully converge (" + res["message"] + "). "
-            "The proportions below are its best attempt — review carefully."
+            "The optimizer did not fully converge (" + res["message"] + ") for the "
+            f"{selected_label} blend. The proportions below are its best attempt — "
+            "review carefully."
         )
-
-    n_fail = int((~res["passes"]).sum())
     if n_fail == 0:
-        st.success("Best-fit blend satisfies the target band at every controlled sieve.")
+        st.success(f"{selected_label} blend satisfies the target band at every controlled sieve.")
     else:
         st.warning(
-            f"Best-fit blend is outside the target band at {n_fail} sieve(s) — "
-            "see the table below. This can mean the available stockpiles cannot "
-            "fully satisfy this gradation; consider adjusting min/max limits or "
-            "sourcing an additional stockpile (e.g. extra filler or fines)."
+            f"{selected_label} blend is outside the target band at {n_fail} sieve(s) — "
+            "see the table below. Try one of the other trial blends above, adjust "
+            "min/max limits, or source an additional stockpile (e.g. extra filler or fines)."
         )
 
-    st.subheader("Recommended proportions")
+    st.subheader(f"Recommended proportions — {selected_label}")
 
     rounding = st.select_slider(
         "Round proportions to nearest", options=[0.1, 0.5, 1.0], value=0.5,
@@ -234,6 +323,7 @@ if "results" in st.session_state:
         ax1.bar(names, raw_pct, color="#4C78A8")
         ax1.set_ylabel("% of blend")
         ax1.set_title("Stockpile proportions")
+        ax1.set_xticks(range(len(names)))
         ax1.set_xticklabels(names, rotation=30, ha="right")
         fig1.tight_layout()
         st.pyplot(fig1)
@@ -290,15 +380,45 @@ if "results" in st.session_state:
     # ---------------------------------------------------------------
     # Export
     # ---------------------------------------------------------------
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+    st.subheader("Export")
+    ec1, ec2 = st.columns(2)
+
+    xbuf = io.BytesIO()
+    with pd.ExcelWriter(xbuf, engine="openpyxl") as writer:
         prop_df.to_excel(writer, sheet_name="Proportions", index=False)
         result_df.to_excel(writer, sheet_name="Blended Gradation", index=False)
-    st.download_button(
-        "Download report (Excel)",
-        data=buf.getvalue(),
-        file_name=f"asphalt_proportioning_{mix_type.replace(' ', '')}_{course.replace(' ', '')}_{designation.replace('/', '-')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    with ec1:
+        st.download_button(
+            "Download Excel workbook",
+            data=xbuf.getvalue(),
+            file_name=f"asphalt_proportioning_{mix_type.replace(' ', '')}_{course.replace(' ', '')}_{designation.replace('/', '-')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
+    blend_options_summary = [
+        {"label": o["label"], "note": o["note"], "n_fail": n_fails[i]}
+        for i, o in enumerate(options)
+    ]
+    target_info = {"mix_type": mix_type, "course": course, "designation": designation}
+    pdf_bytes = build_pdf_report(
+        project_info=project_info,
+        target_info=target_info,
+        blend_options=blend_options_summary,
+        selected_label=selected_label,
+        prop_df=prop_df,
+        result_df=result_df,
+        n_fail=n_fail,
+        gradation_fig=fig2,
+        proportions_fig=fig1,
     )
+    with ec2:
+        st.download_button(
+            "Download PDF report",
+            data=pdf_bytes,
+            file_name=f"asphalt_proportioning_report_{designation.replace('/', '-')}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
 else:
-    st.info("Enter your stockpile gradations above, then click **Compute best-fit proportions**.")
+    st.info("Enter your stockpile gradations above, then click **Compute proportioning options**.")
