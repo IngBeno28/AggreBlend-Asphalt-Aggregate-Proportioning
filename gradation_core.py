@@ -122,7 +122,7 @@ def target_bounds_arrays(target):
 
 
 def optimize_blend(stockpile_matrix, target, min_pct=None, max_pct=None,
-                    violation_weight=1000.0):
+                    violation_weight=1000.0, target_frac=0.5):
     """
     Solve for the stockpile proportions (summing to 100%) that best fit the
     target gradation band.
@@ -133,16 +133,23 @@ def optimize_blend(stockpile_matrix, target, min_pct=None, max_pct=None,
     min_pct, max_pct  : optional per-stockpile proportion bounds (0-100).
                          Default is 0-100 for every stockpile.
     violation_weight  : how heavily out-of-band deviation is penalized
-                         relative to distance from the band midpoint.
-                         Kept high so the optimizer prioritizes landing
-                         inside the spec band over hugging the midpoint.
+                         relative to distance from the target line. Kept
+                         high so the optimizer prioritizes landing inside
+                         the spec band over hugging the target line.
+    target_frac       : where within the band (0 = lower control point,
+                         1 = upper control point, 0.5 = mid-band) the
+                         secondary objective aims once a sieve is inside
+                         the band. Lets you generate a family of distinct,
+                         all-in-spec trial blends (coarse-leaning,
+                         balanced, fine-leaning) instead of a single
+                         midpoint-only answer.
 
     Returns dict with weights (fractions, sum to 1), blend (% passing per
     sieve), lower/upper/mask arrays, and per-sieve pass/fail booleans.
     """
     n_sieves, n_piles = stockpile_matrix.shape
     lower, upper, mask = target_bounds_arrays(target)
-    mid = (lower + upper) / 2.0
+    mid = lower + target_frac * (upper - lower)
 
     if min_pct is None:
         min_pct = np.zeros(n_piles)
@@ -212,8 +219,16 @@ def optimize_blend(stockpile_matrix, target, min_pct=None, max_pct=None,
             best = result
     result = best
 
-    w = np.clip(result.x, 0, 1)
-    w = w / w.sum()  # guard against tiny numerical drift off sum=1
+    # Clip to each stockpile's actual bounds (not just [0, 1]) so a min/max
+    # constraint (e.g. a filler locked to a narrow range) is respected, then
+    # only renormalize if the sum has drifted from 1 by more than floating
+    # point noise — and re-clip afterward, since scaling can otherwise nudge
+    # a tightly-bounded stockpile a hair outside its limit.
+    lb = min_pct / 100.0
+    ub = max_pct / 100.0
+    w = np.clip(result.x, lb, ub)
+    if abs(w.sum() - 1.0) > 1e-8:
+        w = np.clip(w / w.sum(), lb, ub)
     blend = blend_of(w)
 
     passes = np.where(
@@ -230,6 +245,39 @@ def optimize_blend(stockpile_matrix, target, min_pct=None, max_pct=None,
         "lower": lower, "upper": upper, "mid": mid, "mask": mask,
         "passes": passes,
     }
+
+
+# Three trial blends spread across the spec band, mirroring how mix
+# designers typically look at a coarse-side, mid-band, and fine-side
+# trial blend before picking a job-mix formula.
+BLEND_PRESETS = [
+    {"key": "coarse", "label": "Coarse-leaning", "frac": 0.3,
+     "note": "Trial blend biased toward the lower (coarser) control points."},
+    {"key": "balanced", "label": "Balanced (mid-band)", "frac": 0.5,
+     "note": "Trial blend targeting the middle of the spec band at every sieve."},
+    {"key": "fine", "label": "Fine-leaning", "frac": 0.7,
+     "note": "Trial blend biased toward the upper (finer) control points."},
+]
+
+
+def optimize_blend_options(stockpile_matrix, target, min_pct=None, max_pct=None,
+                            presets=BLEND_PRESETS):
+    """
+    Run optimize_blend() once per preset in `presets`, returning a list of
+    {key, label, note, frac, result} dicts — one independent trial blend
+    per preset. Each blend individually satisfies the spec as well as the
+    available stockpiles allow; they are not required to differ from each
+    other (if the stockpiles only support one feasible blend, some presets
+    may converge to essentially the same answer).
+    """
+    options = []
+    for preset in presets:
+        res = optimize_blend(
+            stockpile_matrix, target, min_pct=min_pct, max_pct=max_pct,
+            target_frac=preset["frac"],
+        )
+        options.append({**preset, "result": res})
+    return options
 
 
 def evaluate_blend(weights, stockpile_matrix, target):
