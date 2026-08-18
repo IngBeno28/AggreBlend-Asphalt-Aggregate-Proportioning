@@ -84,9 +84,23 @@ def _placeholder_logo_flowable(size_mm=24):
     return flow
 
 
-def _logo_flowable():
+def _logo_flowable(max_w_mm=45, max_h_mm=28):
+    """Fit the real logo (if present) within a bounding box, preserving its
+    aspect ratio — most company marks aren't perfectly square, and forcing
+    one into a square would stretch/distort it."""
     if os.path.exists(LOGO_PATH):
-        flow = Image(LOGO_PATH, width=24 * mm, height=24 * mm)
+        from PIL import Image as PILImage
+        try:
+            w_px, h_px = PILImage.open(LOGO_PATH).size
+        except Exception:
+            return _placeholder_logo_flowable()
+        aspect = h_px / w_px
+        width = max_w_mm * mm
+        height = width * aspect
+        if height > max_h_mm * mm:
+            height = max_h_mm * mm
+            width = height / aspect
+        flow = Image(LOGO_PATH, width=width, height=height)
         flow.hAlign = "CENTER"
         return flow
     return _placeholder_logo_flowable()
