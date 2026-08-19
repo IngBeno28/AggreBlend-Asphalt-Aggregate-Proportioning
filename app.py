@@ -202,7 +202,7 @@ for i in range(n_piles):
         nm = st.text_input(f"Stockpile {i + 1} name", value=default_names[i], key=f"name_{i}")
         pile_names.append(nm if nm.strip() else f"Stockpile {i + 1}")
         ftype = st.selectbox(
-            "Filler type", FILLER_TYPES,
+            "Material type", FILLER_TYPES,
             index=FILLER_TYPES.index(default_filler_type[i]),
             key=f"ftype_{i}",
             help="Active filler (e.g. hydrated lime) is capped by Table 17.3; "
@@ -357,7 +357,7 @@ if "results" in st.session_state:
 
     prop_df = pd.DataFrame({
         "Stockpile": names,
-        "Filler type": filler_types,
+        "Material type": filler_types,
         "Optimized %": np.round(raw_pct, 2),
         f"Rounded % (to {rounding})": np.round(rounded, 2),
     })
