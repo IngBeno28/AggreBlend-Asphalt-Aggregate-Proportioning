@@ -250,6 +250,8 @@ def build_pdf_report(
     n_fail,              # int, sieves failing for the selected blend
     gradation_fig=None,  # matplotlib Figure
     proportions_fig=None,  # matplotlib Figure
+    filler_checks=None,   # list of {name, pct, cap_pct, compliant} for active filler piles
+    active_cap_pct=None,   # float, the active filler cap applied (informational)
 ):
     styles = _styles()
     buf = io.BytesIO()
@@ -326,7 +328,12 @@ def build_pdf_report(
 
     story.append(Paragraph("Stockpile Proportions", styles["body_bold"]))
     prop_rows = [list(prop_df.columns)] + prop_df.astype(str).values.tolist()
-    prop_tbl = Table(prop_rows, colWidths=[70 * mm, 40 * mm, 40 * mm])
+    n_prop_cols = len(prop_df.columns)
+    prop_col_widths = (
+        [55 * mm, 35 * mm, 30 * mm, 30 * mm] if n_prop_cols == 4
+        else [70 * mm, 40 * mm, 40 * mm]
+    )
+    prop_tbl = Table(prop_rows, colWidths=prop_col_widths)
     prop_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY_BG),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -339,6 +346,46 @@ def build_pdf_report(
     ]))
     story.append(prop_tbl)
     story.append(Spacer(1, 5 * mm))
+
+    if filler_checks:
+        story.append(Paragraph("Active Filler Cap Check (Table 17.3)", styles["body_bold"]))
+        cap_label = f"{active_cap_pct:g}%" if active_cap_pct is not None else "-"
+        fc_rows = [["Stockpile", "Blend %", "Cap (%)", "Status"]]
+        any_over = False
+        for fc in filler_checks:
+            ok = fc["compliant"]
+            any_over = any_over or not ok
+            fc_rows.append([
+                escape(str(fc["name"])), f"{fc['pct']:.2f}", f"{fc['cap_pct']:g}",
+                "OK" if ok else "OVER CAP",
+            ])
+        fc_tbl = Table(fc_rows, colWidths=[70 * mm, 30 * mm, 25 * mm, 25 * mm])
+        fc_style = [
+            ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY_BG),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+            ("BOX", (0, 0), (-1, -1), 0.75, BORDER_GRAY),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]
+        for i, fc in enumerate(filler_checks, start=1):
+            if not fc["compliant"]:
+                fc_style.append(("BACKGROUND", (0, i), (-1, i), FAIL_BG))
+        fc_tbl.setStyle(TableStyle(fc_style))
+        story.append(fc_tbl)
+        note = (
+            f"Active filler is capped at {cap_label} by mass of the total asphalt concrete "
+            "per Table 17.3, unless a Special Specification states otherwise. Active filler "
+            "material must also be dry, ≥75% passing the 0.075 mm sieve, 100% passing the "
+            "0.425 mm sieve, with a bulk density in toluene of 0.5–0.9 g/mL and voids in dry "
+            "compacted filler of 0.3–0.5% (BS 812-2) — verified separately in the laboratory."
+        )
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(note, styles["italic_left"]))
+        story.append(Spacer(1, 5 * mm))
 
     story.append(Paragraph("Blended Gradation vs. Target", styles["body_bold"]))
     grad_rows = [list(result_df.columns)] + result_df.astype(str).values.tolist()
