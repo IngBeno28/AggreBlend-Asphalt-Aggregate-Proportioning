@@ -9,7 +9,7 @@ best satisfy a target job-mix gradation band, then reports the blended
 gradation against the spec and exports a branded PDF/Excel report.
 
 Spec source (default): Ghana Highway Authority, Standard Specification for
-Road and Bridge Works, Table 17.3 - Grading Requirements for Asphalt
+Road and Bridge Works - Grading Requirements for Asphalt
 Concrete (Type I / Type II, Wearing / Binder Course).
 
 Run locally with:  streamlit run app.py
