@@ -26,6 +26,8 @@ import matplotlib.pyplot as plt
 from gradation_core import (
     SIEVES, SIEVE_LABELS, NMAS_MM, SPEC, available_courses,
     available_designations, get_target, optimize_blend_options, evaluate_blend,
+    FILLER_TYPES, ACTIVE_FILLER_CAP_PCT, ACTIVE_FILLER_PHYSICAL_REQS,
+    check_active_filler_cap,
 )
 from pdf_report import build_pdf_report, APP_NAME
 
@@ -159,25 +161,68 @@ default_names = [
     "Coarse chippings", "Crusher-run / dust", "Sand", "Mineral filler",
     "Stockpile 5", "Stockpile 6",
 ]
+# "Mineral filler" is the only default stockpile likely to be an added
+# active filler (e.g. hydrated lime) rather than plain aggregate.
+default_filler_type = ["Aggregate", "Aggregate", "Aggregate", "Active filler",
+                        "Aggregate", "Aggregate"]
+
+with st.expander("Mineral filler — active filler cap (Table 17.3)"):
+    st.caption(
+        "Mark any stockpile added specifically for adhesion (e.g. hydrated lime) as "
+        "**Active filler**. Table 17.3 caps active filler at "
+        f"**{ACTIVE_FILLER_CAP_PCT:.0f}% by mass of the total asphalt concrete**, unless a "
+        "Special Specification states otherwise. Filler added only to correct gradation "
+        "(e.g. rock/stone dust) should be marked **Inert filler** — it is not subject to "
+        "this cap."
+    )
+    spec_override = st.checkbox(
+        "A Special Specification permits a different active filler limit",
+        value=False, key="filler_cap_override",
+    )
+    if spec_override:
+        active_cap_pct = st.number_input(
+            "Special Specification active filler limit (%)", min_value=0.0,
+            max_value=100.0, value=ACTIVE_FILLER_CAP_PCT, step=0.1,
+            key="filler_cap_value",
+        )
+    else:
+        active_cap_pct = ACTIVE_FILLER_CAP_PCT
+    st.markdown("**Physical property requirements for active filler material** (checked in the lab, not computed here):")
+    for req in ACTIVE_FILLER_PHYSICAL_REQS:
+        st.markdown(f"- {req}")
 
 pile_names = []
 min_pcts = []
 max_pcts = []
+filler_types = []
 
 name_cols = st.columns(n_piles)
 for i in range(n_piles):
     with name_cols[i]:
         nm = st.text_input(f"Stockpile {i + 1} name", value=default_names[i], key=f"name_{i}")
         pile_names.append(nm if nm.strip() else f"Stockpile {i + 1}")
+        ftype = st.selectbox(
+            "Filler type", FILLER_TYPES,
+            index=FILLER_TYPES.index(default_filler_type[i]),
+            key=f"ftype_{i}",
+            help="Active filler (e.g. hydrated lime) is capped by Table 17.3; "
+                 "inert filler (e.g. rock dust) and ordinary aggregate are not.",
+        )
+        filler_types.append(ftype)
+        default_max = active_cap_pct if ftype == "Active filler" else 100.0
         c_min, c_max = st.columns(2)
         with c_min:
             mn = st.number_input("Min %", min_value=0.0, max_value=100.0, value=0.0,
                                   step=1.0, key=f"min_{i}")
         with c_max:
-            mx = st.number_input("Max %", min_value=0.0, max_value=100.0, value=100.0,
-                                  step=1.0, key=f"max_{i}")
+            mx = st.number_input("Max %", min_value=0.0, max_value=100.0, value=default_max,
+                                  step=0.1 if ftype == "Active filler" else 1.0, key=f"max_{i}")
         min_pcts.append(mn)
         max_pcts.append(mx)
+        if ftype == "Active filler" and mx > active_cap_pct + 1e-9:
+            st.caption(
+                f"⚠ Max % ({mx:g}%) exceeds the {active_cap_pct:g}% active filler cap."
+            )
 
 pile_names = _dedupe(pile_names)
 
@@ -312,10 +357,35 @@ if "results" in st.session_state:
 
     prop_df = pd.DataFrame({
         "Stockpile": names,
+        "Filler type": filler_types,
         "Optimized %": np.round(raw_pct, 2),
         f"Rounded % (to {rounding})": np.round(rounded, 2),
     })
     st.dataframe(prop_df, hide_index=True, use_container_width=True)
+
+    # -----------------------------------------------------------------
+    # Active filler cap check (Table 17.3 mineral filler clause)
+    # -----------------------------------------------------------------
+    filler_checks = check_active_filler_cap(names, filler_types, rounded, cap_pct=active_cap_pct)
+    if filler_checks:
+        st.markdown("**Active filler cap check**")
+        fc_df = pd.DataFrame([{
+            "Stockpile": fc["name"],
+            "Blend %": round(fc["pct"], 2),
+            "Cap (%)": fc["cap_pct"],
+            "Status": "OK" if fc["compliant"] else "OVER CAP",
+        } for fc in filler_checks])
+        st.dataframe(fc_df, hide_index=True, use_container_width=True)
+        n_over_cap = sum(1 for fc in filler_checks if not fc["compliant"])
+        if n_over_cap:
+            st.error(
+                f"{n_over_cap} active filler stockpile(s) exceed the {active_cap_pct:g}% cap "
+                "by mass of the total asphalt concrete. Lower its Max % limit in section 2 "
+                "and recompute, use it partly as inert filler instead, or confirm a Special "
+                "Specification permits a higher limit."
+            )
+        else:
+            st.success(f"All active filler stockpiles are within the {active_cap_pct:g}% cap.")
 
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -411,6 +481,8 @@ if "results" in st.session_state:
         n_fail=n_fail,
         gradation_fig=fig2,
         proportions_fig=fig1,
+        filler_checks=filler_checks,
+        active_cap_pct=active_cap_pct,
     )
     with ec2:
         st.download_button(
