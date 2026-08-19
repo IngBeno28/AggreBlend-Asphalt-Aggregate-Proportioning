@@ -31,6 +31,61 @@ SIEVE_LABELS = ["28", "20", "14", "10", "6.3", "4", "2", "1",
 NMAS_MM = {"0/20": 20, "0/14": 14, "0/10": 10, "0/6": 6.3}
 
 # ---------------------------------------------------------------------
+# Mineral filler classification.
+#
+# GHA Table 17.3 (mineral filler clause) distinguishes:
+#   - Active filler: added specifically for adhesion/stripping resistance
+#     (typically hydrated lime). Capped at ACTIVE_FILLER_CAP_PCT by mass
+#     of the total asphalt concrete unless a Special Specification states
+#     otherwise.
+#   - Inert filler: added purely to correct gradation (e.g. rock/stone
+#     dust). Not subject to the active-filler cap.
+#   - Aggregate: an ordinary coarse/fine aggregate stockpile, not a
+#     filler at all — no cap applies.
+# ---------------------------------------------------------------------
+FILLER_TYPES = ["Aggregate", "Active filler", "Inert filler"]
+
+ACTIVE_FILLER_CAP_PCT = 1.0  # % by mass of the total asphalt concrete
+
+# Physical property requirements on the ACTIVE filler material itself
+# (not a gradation-band item — these are lab/material properties, shown
+# to the user as a compliance checklist rather than computed).
+ACTIVE_FILLER_PHYSICAL_REQS = [
+    "Dry when incorporated into the mix",
+    "≥ 75% passing the 0.075 mm sieve",
+    "100% passing the 0.425 mm sieve",
+    "Bulk density in toluene: 0.5–0.9 g/mL",
+    "Voids in dry compacted filler: 0.3–0.5% (per BS 812-2)",
+]
+
+
+def check_active_filler_cap(pile_names, filler_types, weights_pct, cap_pct=ACTIVE_FILLER_CAP_PCT):
+    """
+    Check each stockpile classified as 'Active filler' against the mass
+    cap (default ACTIVE_FILLER_CAP_PCT, i.e. 1% of the total asphalt
+    concrete) unless a Special Specification cap override is supplied.
+
+    pile_names   : list[str]
+    filler_types : list[str], one of FILLER_TYPES per stockpile
+    weights_pct  : array-like, % of the blend per stockpile (sums to ~100)
+    cap_pct      : the cap to check against (default 1.0; pass a different
+                   value if a Special Specification permits a higher limit)
+
+    Returns a list of dicts, one per 'Active filler' stockpile:
+        {"name", "pct", "cap_pct", "compliant"}
+    """
+    results = []
+    for name, ftype, pct in zip(pile_names, filler_types, weights_pct):
+        if ftype == "Active filler":
+            results.append({
+                "name": name,
+                "pct": float(pct),
+                "cap_pct": float(cap_pct),
+                "compliant": float(pct) <= float(cap_pct) + 1e-9,
+            })
+    return results
+
+# ---------------------------------------------------------------------
 # Table 17.3 - Grading Requirements for Asphalt Concrete
 # Each leaf value is (lower, upper) percent passing, or None where the
 # spec shows "-" (no control point at that sieve).
