@@ -169,7 +169,7 @@ default_filler_type = ["Aggregate", "Aggregate", "Aggregate", "Active filler",
 with st.expander("Mineral filler — active filler cap "):
     st.caption(
         "Mark any stockpile added specifically for adhesion (e.g. hydrated lime) as "
-        "**Active filler**. The Ghana High Way Authority caps active filler at "
+        "**Active filler**. The Ghana High Way Authority Specification caps active filler at "
         f"**{ACTIVE_FILLER_CAP_PCT:.0f}% by mass of the total asphalt concrete**, unless a "
         "Special Specification states otherwise. Filler added only to correct gradation "
         "(e.g. rock/stone dust) should be marked **Inert filler** — it is not subject to "
