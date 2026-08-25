@@ -46,6 +46,74 @@ def _dedupe(names):
     return out
 
 
+def _build_csv_template(sieve_labels, pile_names):
+    """Build a blank, fillable CSV template matching the current stockpiles."""
+    template_df = pd.DataFrame("", index=sieve_labels, columns=pile_names)
+    template_df.index.name = "Sieve (mm)"
+    return template_df.to_csv().encode("utf-8")
+
+
+def _parse_csv_gradation(uploaded_file, sieve_labels, pile_names):
+    """Parse an uploaded sieve-analysis CSV into a DataFrame aligned to the
+    current sieve labels and stockpile names.
+
+    Returns (df, warning_message_or_None) on success, or raises ValueError
+    with a human-readable message on failure.
+    """
+    try:
+        raw_df = pd.read_csv(uploaded_file, index_col=0)
+    except Exception as e:
+        raise ValueError(f"Could not read the file as CSV ({e}).")
+
+    raw_df.index = raw_df.index.astype(str).str.strip()
+    raw_df.columns = [str(c).strip() for c in raw_df.columns]
+
+    missing_sieves = [s for s in sieve_labels if s not in raw_df.index]
+    if missing_sieves:
+        raise ValueError(
+            "The CSV is missing row(s) for sieve(s): " + ", ".join(missing_sieves)
+            + ". Download the template below to make sure every sieve is present."
+        )
+    if raw_df.index.duplicated().any():
+        raise ValueError("The CSV has duplicate sieve rows. Each sieve should appear once.")
+
+    if len(raw_df.columns) != len(pile_names):
+        raise ValueError(
+            f"The CSV has {len(raw_df.columns)} stockpile column(s), but "
+            f"{len(pile_names)} stockpile(s) are configured above. Match the "
+            "number of stockpiles (or the CSV columns) and re-upload."
+        )
+
+    warning = None
+    if set(raw_df.columns) == set(pile_names):
+        # Column headers match the current stockpile names (order may differ) —
+        # align by name so re-ordered columns still map correctly.
+        aligned = raw_df.reindex(columns=pile_names)
+    else:
+        # Headers don't match current stockpile names — fall back to matching
+        # by column position and warn so the user can double check.
+        aligned = raw_df.copy()
+        aligned.columns = pile_names
+        warning = (
+            "The CSV column headers didn't exactly match your current stockpile "
+            "names, so columns were matched by position/order. Rename the "
+            "stockpiles above to match, or edit the CSV headers, to keep things in sync."
+        )
+
+    aligned = aligned.reindex(sieve_labels)
+    numeric = aligned.apply(pd.to_numeric, errors="coerce")
+
+    if numeric.isna().any().any():
+        raise ValueError(
+            "Some cells in the uploaded CSV are blank or non-numeric. Every "
+            "sieve/stockpile cell must contain a % passing value between 0 and 100."
+        )
+    if ((numeric < 0) | (numeric > 100)).any().any():
+        raise ValueError("All % passing values in the CSV must be between 0 and 100.")
+
+    return numeric.astype(float), warning
+
+
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="🛣️")
 
 # =======================================================================
@@ -227,6 +295,48 @@ for i in range(n_piles):
 pile_names = _dedupe(pile_names)
 
 st.markdown("**Sieve analysis (% passing by mass) for each stockpile**")
+
+with st.expander("📄 Upload sieve analysis from CSV (optional)"):
+    st.caption(
+        "Download the template below, fill in the measured % passing for each "
+        "stockpile's grading test, then upload it here to populate the table — "
+        "instead of typing values in one by one."
+    )
+    tcol, ucol = st.columns([1, 2])
+    with tcol:
+        st.download_button(
+            "⬇ Download CSV template",
+            data=_build_csv_template(SIEVE_LABELS, pile_names),
+            file_name="stockpile_gradation_template.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help="A blank template with a row per sieve and a column for each "
+                 "stockpile currently configured above.",
+        )
+    with ucol:
+        uploaded_csv = st.file_uploader(
+            "Upload filled-in template",
+            type=["csv"],
+            key="grad_csv_upload",
+            help="Must have the same sieves as the template. Columns are matched "
+                 "to the stockpiles above by name, or by position if the names differ.",
+        )
+
+    if uploaded_csv is not None:
+        upload_sig = (uploaded_csv.name, uploaded_csv.size, tuple(pile_names))
+        if st.session_state.get("_last_csv_upload_sig") != upload_sig:
+            try:
+                parsed_df, csv_warning = _parse_csv_gradation(uploaded_csv, SIEVE_LABELS, pile_names)
+            except ValueError as e:
+                st.error(str(e))
+            else:
+                st.session_state["_grad_df"] = parsed_df
+                st.session_state["_last_csv_upload_sig"] = upload_sig
+                st.session_state.pop("grad_editor", None)  # reset editor widget state
+                if csv_warning:
+                    st.warning(csv_warning)
+                st.success(f"Loaded sieve analysis from **{uploaded_csv.name}**.")
+                st.rerun()
 
 if ("_grad_df" not in st.session_state
         or list(st.session_state["_grad_df"].columns) != pile_names):
