@@ -176,7 +176,7 @@ st.markdown(f"""
     <div>
       <p class="hero-title">{APP_NAME}</p>
       <p class="hero-subtitle">Best-fit stockpile blending against Ghana Highway Authority
-      Table 17.3 gradation bands — with coarse, balanced, and fine trial blends compared side by side.</p>
+      gradation bands — with coarse, balanced, and fine trial blends compared side by side.</p>
     </div>
   </div>
   <div class="hero-rule"></div>
