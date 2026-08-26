@@ -155,6 +155,8 @@ st.markdown("""
     width: 62px; height: 62px; display: flex; align-items: center; justify-content: center;
 }
 .hero-title { font-size: 2.1rem; font-weight: 800; color: #111827; margin: 0; }
+.hero-title a { color: inherit; text-decoration: none; }
+.hero-title a:hover { text-decoration: underline; }
 .hero-subtitle { color: #6b7280; font-size: 1.02rem; margin: 4px 0 0 0; }
 .hero-rule {
     height: 4px; width: 100%; margin: 16px 0 22px 0; border-radius: 3px;
@@ -169,12 +171,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+REPO_URL = "https://github.com/IngBeno28/AggreBlend-Asphalt-Aggregate-Proportioning/tree/main"
+REPO_LABEL = "AggreBlend-Asphalt-Aggregate-Proportioning"
+
 st.markdown(f"""
 <div class="hero-wrap">
   <div class="hero-row">
     <div class="hero-icon">🛣️</div>
     <div>
-      <p class="hero-title">{APP_NAME}</p>
+      <p class="hero-title"><a href="{REPO_URL}" target="_blank" rel="noopener noreferrer">{REPO_LABEL}</a></p>
       <p class="hero-subtitle">Best-fit stockpile blending against Ghana Highway Authority
       gradation bands — with coarse, balanced, and fine trial blends compared side by side.</p>
     </div>
