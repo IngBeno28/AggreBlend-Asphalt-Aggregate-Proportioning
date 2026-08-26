@@ -53,6 +53,22 @@ def _build_csv_template(sieve_labels, pile_names):
     return template_df.to_csv().encode("utf-8")
 
 
+def _sieve_key(label):
+    """Normalize a sieve label for robust matching.
+
+    Spreadsheet apps commonly re-save numeric-looking labels in "general"
+    number format when a filled-in template is saved back to CSV — e.g.
+    Excel turns "0.300" into "0.3" and "28.0" into "28". Matching on the
+    numeric value instead of the exact text keeps uploads working after
+    that kind of round-trip through Excel/Sheets/Numbers.
+    """
+    text = str(label).strip()
+    try:
+        return round(float(text), 6)
+    except (TypeError, ValueError):
+        return text.lower()
+
+
 def _parse_csv_gradation(uploaded_file, sieve_labels, pile_names):
     """Parse an uploaded sieve-analysis CSV into a DataFrame aligned to the
     current sieve labels and stockpile names.
@@ -65,17 +81,25 @@ def _parse_csv_gradation(uploaded_file, sieve_labels, pile_names):
     except Exception as e:
         raise ValueError(f"Could not read the file as CSV ({e}).")
 
-    raw_df.index = raw_df.index.astype(str).str.strip()
     raw_df.columns = [str(c).strip() for c in raw_df.columns]
+    raw_df.index = [_sieve_key(i) for i in raw_df.index]
+    label_keys = [_sieve_key(s) for s in sieve_labels]
 
-    missing_sieves = [s for s in sieve_labels if s not in raw_df.index]
+    if raw_df.index.duplicated().any():
+        dup_keys = set(raw_df.index[raw_df.index.duplicated()])
+        dup_labels = [s for s, k in zip(sieve_labels, label_keys) if k in dup_keys]
+        raise ValueError(
+            "The CSV has duplicate row(s) for sieve(s): "
+            + ", ".join(dup_labels or [str(k) for k in dup_keys])
+            + ". Each sieve should appear once."
+        )
+
+    missing_sieves = [s for s, k in zip(sieve_labels, label_keys) if k not in raw_df.index]
     if missing_sieves:
         raise ValueError(
             "The CSV is missing row(s) for sieve(s): " + ", ".join(missing_sieves)
             + ". Download the template below to make sure every sieve is present."
         )
-    if raw_df.index.duplicated().any():
-        raise ValueError("The CSV has duplicate sieve rows. Each sieve should appear once.")
 
     if len(raw_df.columns) != len(pile_names):
         raise ValueError(
@@ -100,7 +124,10 @@ def _parse_csv_gradation(uploaded_file, sieve_labels, pile_names):
             "stockpiles above to match, or edit the CSV headers, to keep things in sync."
         )
 
-    aligned = aligned.reindex(sieve_labels)
+    # Re-order rows to the canonical sieve order using the normalized keys,
+    # then restore the exact SIEVE_LABELS text as the index.
+    aligned = aligned.reindex(label_keys)
+    aligned.index = list(sieve_labels)
     numeric = aligned.apply(pd.to_numeric, errors="coerce")
 
     if numeric.isna().any().any():
