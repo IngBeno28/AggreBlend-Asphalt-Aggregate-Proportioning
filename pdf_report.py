@@ -274,13 +274,24 @@ def build_pdf_report(
     story.append(HRFlowable(width="55%", thickness=1.4, color=BRAND_BLUE, spaceAfter=10, hAlign="CENTER"))
     story.append(Spacer(1, 6 * mm))
 
+    # Values are wrapped in Paragraph() rather than passed as raw strings so
+    # a long project or client name reflows inside its cell instead of
+    # overflowing into the neighboring column.
     info_rows = [
-        ["Project", escape(str(project_info.get("project_name") or "Unnamed Project"))],
-        ["Prepared For", escape(str(project_info.get("prepared_for") or "-"))],
-        ["Prepared By", escape(str(project_info.get("prepared_by") or COMPANY_NAME))],
-        ["Date Generated", escape(str(project_info.get("report_date") or ""))],
-        ["Target Mix", subtitle.replace(" Gradation Specification", "")],
-        ["Blend Options Evaluated", str(len(blend_options))],
+        [Paragraph("Project", styles["body_bold"]),
+         Paragraph(escape(str(project_info.get("project_name") or "Unnamed Project")), styles["body"])],
+        [Paragraph("Prepared For", styles["body_bold"]),
+         Paragraph(escape(str(project_info.get("prepared_for") or "-")), styles["body"])],
+        [Paragraph("Prepared By", styles["body_bold"]),
+         Paragraph(escape(str(project_info.get("prepared_by") or COMPANY_NAME)), styles["body"])],
+        [Paragraph("Date Generated", styles["body_bold"]),
+         Paragraph(escape(str(project_info.get("report_date") or "")), styles["body"])],
+        [Paragraph("Target Mix", styles["body_bold"]),
+         # subtitle's pieces are already escape()'d where it's built above —
+         # escaping again here would double-escape any &/</>  it contains.
+         Paragraph(subtitle.replace(" Gradation Specification", ""), styles["body"])],
+        [Paragraph("Blend Options Evaluated", styles["body_bold"]),
+         Paragraph(str(len(blend_options)), styles["body"])],
     ]
     story.append(_info_table(info_rows))
     story.append(Spacer(1, 14 * mm))
