@@ -386,7 +386,16 @@ grad_df = st.data_editor(
     use_container_width=True,
     key="grad_editor",
 )
-st.session_state["_grad_df"] = grad_df
+# NOTE: deliberately not writing st.session_state["_grad_df"] = grad_df here.
+# st.data_editor already tracks its own live value internally under its
+# `key`, and everything below reads the local `grad_df` return value
+# directly (same-run). Feeding the editor's own output back into the same
+# session_state entry that seeds it, under an unchanged key, is a
+# well-documented Streamlit bug: edits lag by one rerun, so a typed value
+# doesn't register until you type it again. `_grad_df` in session_state is
+# only ever meant to be the *seed* — it's set on init, on a CSV upload, and
+# when the stockpile columns change; it should stay untouched by the
+# editor's own return value in between.
 
 # Basic sanity check: % passing should not increase as sieve size decreases
 warnings = []
