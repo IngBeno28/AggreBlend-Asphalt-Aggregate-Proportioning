@@ -400,7 +400,12 @@ grad_df = st.data_editor(
 # Basic sanity check: % passing should not increase as sieve size decreases
 warnings = []
 for name in pile_names:
-    col = grad_df[name].to_numpy(dtype=float)
+    # na_value=np.nan guards against pandas' nullable Float64 dtype, which
+    # st.data_editor's NumberColumn can back a column with — a blank cell
+    # there is pd.NA, and a plain `.to_numpy(dtype=float)` raises on that
+    # instead of yielding NaN. Coercing explicitly keeps this a normal,
+    # comparable NaN so np.diff/np.isnan below behave the same either way.
+    col = grad_df[name].to_numpy(dtype=float, na_value=np.nan)
     if np.any(np.diff(col) > 0.5):  # small tolerance for rounding
         warnings.append(name)
 if warnings:
@@ -419,7 +424,10 @@ st.header("3. Proportioning")
 run = st.button("Compute proportioning options", type="primary")
 
 if run:
-    matrix = grad_df.loc[SIEVE_LABELS, pile_names].to_numpy(dtype=float)
+    # na_value=np.nan: see the note above the sanity-check loop — without it,
+    # a blank cell backed by pandas' nullable Float64 dtype raises here
+    # instead of surfacing as the friendly "fill in every cell" error below.
+    matrix = grad_df.loc[SIEVE_LABELS, pile_names].to_numpy(dtype=float, na_value=np.nan)
     if np.isnan(matrix).any():
         st.error(
             "One or more sieve entries are blank. Fill in every cell of the "
