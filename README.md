@@ -1,4 +1,4 @@
-# Asphalt Coarse Aggregate Proportioning Calculator
+# Automated aggregate proportioning and optimization tool
 
 Part of Automation_hub's materials & geotechnical engineering toolset.
 
